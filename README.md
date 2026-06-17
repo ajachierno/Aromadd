@@ -118,3 +118,7 @@ Use at your own risk. Licensed under the MIT License.
 ## Buy me a coffee
 
 Did you find this helpful? Consider buying me a coffee to support additional development: [buymeacoffee](https://buymeacoffee.com/ajachiernoo)
+
+<a href="https://buymeacoffee.com/ajachiernoo">
+  <img src="brand/buymeacoffee_qr.png" alt="Buy me a coffee QR code" width="200">
+</a>
