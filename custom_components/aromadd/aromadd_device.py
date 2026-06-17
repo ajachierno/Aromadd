@@ -1,8 +1,9 @@
 """BLE communication layer for the Aromadd Diffuser.
 
-Connects to the diffuser, sends a framed command, waits briefly for the
-device's state-report notification to confirm the result, then disconnects so
-the official Aromadd app can reconnect.
+Connects to the diffuser, resolves the control characteristics from the live
+GATT table, sends a framed command, waits briefly for the device's state-report
+notification to confirm the result, then disconnects so the official Aromadd app
+can reconnect.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 
+from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import (
@@ -39,13 +41,15 @@ _LOGGER = logging.getLogger(__name__)
 # falling back to assuming the command worked.
 CONFIRM_TIMEOUT = 4.0
 
-# Map each control to its (on payload, off payload, state-report prefix).
+# Bluetooth SIG base UUID suffix; characteristics/services NOT ending in this are
+# vendor-specific (the Aromadd control service is one of these).
+_SIG_BASE_SUFFIX = "-0000-1000-8000-00805f9b34fb"
+
 _COMMANDS: dict[str, tuple[bytes, bytes, bytes]] = {
     CONTROL_POWER: (PAYLOAD_POWER_ON, PAYLOAD_POWER_OFF, REPORT_POWER_PREFIX),
     CONTROL_FAN: (PAYLOAD_FAN_ON, PAYLOAD_FAN_OFF, REPORT_FAN_PREFIX),
 }
 
-# Map a state-report prefix back to its control key.
 _REPORT_PREFIXES: dict[bytes, str] = {
     REPORT_POWER_PREFIX: CONTROL_POWER,
     REPORT_FAN_PREFIX: CONTROL_FAN,
@@ -69,6 +73,60 @@ def _parse_report(data: bytes) -> tuple[str, bool] | None:
         if payload[: len(prefix)] == prefix and len(payload) > len(prefix):
             return control, bool(payload[len(prefix)])
     return None
+
+
+def _is_vendor(uuid: str | None) -> bool:
+    """True if a UUID is vendor-specific (not a standard Bluetooth SIG UUID)."""
+    return bool(uuid) and not uuid.lower().endswith(_SIG_BASE_SUFFIX)
+
+
+def _resolve_characteristics(
+    client: BleakClient,
+) -> tuple[BleakGATTCharacteristic | None, BleakGATTCharacteristic | None]:
+    """Find the write and notify characteristics from the connected GATT table.
+
+    Handle numbers can differ between BLE stacks, so we don't trust the captured
+    handles blindly. We try the handle hints first, then fall back to scanning
+    for writable / notifiable characteristics, preferring the vendor service.
+    """
+    services = client.services
+
+    write_char = services.get_characteristic(WRITE_HANDLE)
+    notify_char = services.get_characteristic(NOTIFY_HANDLE)
+
+    writable: list[BleakGATTCharacteristic] = []
+    notifiable: list[BleakGATTCharacteristic] = []
+    for service in services:
+        for char in service.characteristics:
+            props = char.properties
+            if "write" in props or "write-without-response" in props:
+                writable.append(char)
+            if "notify" in props or "indicate" in props:
+                notifiable.append(char)
+
+    def _prefer_vendor(
+        chars: list[BleakGATTCharacteristic],
+    ) -> BleakGATTCharacteristic | None:
+        if not chars:
+            return None
+        vendor = [c for c in chars if _is_vendor(c.uuid) or _is_vendor(c.service_uuid)]
+        return (vendor or chars)[0]
+
+    if write_char is None:
+        write_char = _prefer_vendor(writable)
+    if notify_char is None:
+        notify_char = _prefer_vendor(notifiable)
+
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        _LOGGER.debug(
+            "GATT chars: writable=%s notifiable=%s -> write=%s notify=%s",
+            [c.uuid for c in writable],
+            [c.uuid for c in notifiable],
+            write_char.uuid if write_char else None,
+            notify_char.uuid if notify_char else None,
+        )
+
+    return write_char, notify_char
 
 
 class AromaddDevice:
@@ -151,25 +209,41 @@ class AromaddDevice:
                 self._ble_device.name or self._ble_device.address,
             )
             try:
-                try:
-                    await client.start_notify(NOTIFY_HANDLE, _on_notify)
-                except Exception as err:  # noqa: BLE001 - notifications are best-effort
-                    _LOGGER.debug("Could not subscribe to notifications: %s", err)
+                write_char, notify_char = _resolve_characteristics(client)
+                if write_char is None:
+                    raise RuntimeError(
+                        "Could not find a writable characteristic on the Aromadd "
+                        "device; the GATT layout was not as expected."
+                    )
 
-                await client.write_gatt_char(WRITE_HANDLE, frame, response=True)
-                _LOGGER.debug("Wrote %s to handle 0x%04x", frame.hex(), WRITE_HANDLE)
+                if notify_char is not None:
+                    try:
+                        await client.start_notify(notify_char, _on_notify)
+                    except Exception as err:  # noqa: BLE001 - best-effort
+                        _LOGGER.debug("Could not subscribe to notifications: %s", err)
 
-                try:
-                    await asyncio.wait_for(confirmed.wait(), timeout=CONFIRM_TIMEOUT)
-                    _LOGGER.debug("Confirmed %s state: %s", control, self._states[control])
-                except asyncio.TimeoutError:
+                await client.write_gatt_char(write_char, frame, response=True)
+                _LOGGER.debug("Wrote %s to %s", frame.hex(), write_char.uuid)
+
+                if notify_char is not None:
+                    try:
+                        await asyncio.wait_for(confirmed.wait(), timeout=CONFIRM_TIMEOUT)
+                        _LOGGER.debug(
+                            "Confirmed %s state: %s", control, self._states[control]
+                        )
+                    except asyncio.TimeoutError:
+                        self._states[control] = turn_on
+                        _LOGGER.debug(
+                            "No confirmation for %s; assuming %s", control, turn_on
+                        )
+                else:
                     self._states[control] = turn_on
-                    _LOGGER.debug("No confirmation for %s; assuming %s", control, turn_on)
             finally:
-                try:
-                    await client.stop_notify(NOTIFY_HANDLE)
-                except Exception:  # noqa: BLE001
-                    pass
+                if notify_char is not None:
+                    try:
+                        await client.stop_notify(notify_char)
+                    except Exception:  # noqa: BLE001
+                        pass
                 await client.disconnect()
 
         self._notify_listeners()

@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device on-board schedules (opcode 0x5716) once the field layout is mapped from
   targeted captures; HA automations against the switches are recommended meanwhile.
 
+## [0.2.2] - 2026-06-17
+
+### Fixed
+- **Control failure** (`BleakCharacteristicNotFoundError: Characteristic 18 was
+  not found`). The integration wrote by raw GATT handle (`0x12`), but handle
+  numbers differ between BLE stacks, so the handle from the phone capture did not
+  resolve on the Home Assistant host. The write/notify characteristics are now
+  discovered from the live GATT table at connect time (handle hint first, then a
+  writable/notifiable + vendor-service fallback).
+- Silenced a `SyntaxWarning` from the escape sequence in `const.py`'s docstring.
+
 ## [0.2.1] - 2026-06-17
 
 ### Fixed
@@ -54,7 +65,8 @@ First public release. Bluetooth LE control of the Aromadd U5 Pro diffuser.
 - Changes made with the physical button or phone app while Home Assistant is not
   connected are not pushed back to HA.
 
-[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ajachierno/Aromadd/releases/tag/v0.1.0

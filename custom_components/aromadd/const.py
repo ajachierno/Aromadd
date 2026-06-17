@@ -1,4 +1,4 @@
-"""Constants for the Aromadd Diffuser integration.
+r"""Constants for the Aromadd Diffuser integration.
 
 ================================================================================
  BLE PROTOCOL  (reverse-engineered from Aromadd U5 Pro HCI snoop logs)
