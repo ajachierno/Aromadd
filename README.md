@@ -105,3 +105,8 @@ custom_components/aromadd/
 
 Unofficial community integration, not affiliated with or endorsed by Aromadd.
 Use at your own risk. Licensed under the MIT License.
+
+
+## Buy me a coffee
+
+Did you find this helpful? Consider buying me a coffee to support additional development: [buymeacoffee](https://buymeacoffee.com/ajachiernoo)
