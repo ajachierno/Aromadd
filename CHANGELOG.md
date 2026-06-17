@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device on-board schedules (opcode 0x5716) once the field layout is mapped from
   targeted captures; HA automations against the switches are recommended meanwhile.
 
+## [0.2.3] - 2026-06-17
+
+### Added
+- Local brand images in `custom_components/aromadd/brand/` (`icon.png`,
+  `icon@2x.png`, `logo.png`, `logo@2x.png`) so the integration icon shows in the
+  Home Assistant UI. This is the supported method for custom integrations as of
+  HA 2026.3; the home-assistant/brands repo no longer accepts custom integrations.
+
 ## [0.2.2] - 2026-06-17
 
 ### Fixed
@@ -65,7 +73,8 @@ First public release. Bluetooth LE control of the Aromadd U5 Pro diffuser.
 - Changes made with the physical button or phone app while Home Assistant is not
   connected are not pushed back to HA.
 
-[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.3
 [0.2.2]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.0

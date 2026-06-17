@@ -21,9 +21,11 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          # 'brands' requires the domain to be registered in the
-          # home-assistant/brands repo (a separate PR). Not required for a
-          # custom-repository install, so it's ignored here.
+          # The home-assistant/brands repo no longer accepts custom
+          # integrations (HA 2026.3+). Brand images now ship locally in
+          # custom_components/aromadd/brand/, so there is nothing for the
+          # 'brands' check to validate against -- it is ignored intentionally.
+          # See https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api
           ignore: brands
 
   hassfest:
