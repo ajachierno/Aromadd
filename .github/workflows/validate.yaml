@@ -20,13 +20,9 @@ jobs:
       - name: HACS Action
         uses: hacs/action@main
         with:
+          # Brands check passes via the local custom_components/aromadd/brand/
+          # icon (HA 2026.3+); no 'ignore' is needed, which hacs/default requires.
           category: integration
-          # The home-assistant/brands repo no longer accepts custom
-          # integrations (HA 2026.3+). Brand images now ship locally in
-          # custom_components/aromadd/brand/, so there is nothing for the
-          # 'brands' check to validate against -- it is ignored intentionally.
-          # See https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api
-          ignore: brands
 
   hassfest:
     name: Hassfest validation
