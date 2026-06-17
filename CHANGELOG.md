@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device on-board schedules (opcode 0x5716) once the field layout is mapped from
   targeted captures; HA automations against the switches are recommended meanwhile.
 
+## [0.2.1] - 2026-06-17
+
+### Fixed
+- **Critical:** removed the invalid Bluetooth `local_name` matcher `"U5*"`. A
+  wildcard in the first three characters is rejected by Home Assistant and caused
+  the core `bluetooth` component to fail to set up, cascading to every
+  Bluetooth-dependent integration (esphome, bluetooth_adapters, bermuda, bedjet,
+  ibeacon, etc.). Remaining matchers (`"U5 Pro*"`, `"Aromadd*"`) are valid.
+
 ## [0.2.0] - 2026-06-16
 
 ### Added
@@ -45,6 +54,7 @@ First public release. Bluetooth LE control of the Aromadd U5 Pro diffuser.
 - Changes made with the physical button or phone app while Home Assistant is not
   connected are not pushed back to HA.
 
-[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ajachierno/Aromadd/releases/tag/v0.1.0
