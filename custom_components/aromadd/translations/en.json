@@ -1,0 +1,22 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Add Aromadd Diffuser",
+        "description": "Select your Aromadd diffuser from the list of nearby Bluetooth devices. Make sure it is powered on and not currently connected in the Aromadd phone app.",
+        "data": {
+          "address": "Bluetooth device"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Add Aromadd Diffuser",
+        "description": "Do you want to set up {name}?"
+      }
+    },
+    "abort": {
+      "no_devices_found": "No nearby Bluetooth devices were found. Power on the diffuser, keep it close to a Bluetooth adapter, and close the Aromadd app so the device is not already connected.",
+      "already_configured": "This device is already configured."
+    }
+  }
+}

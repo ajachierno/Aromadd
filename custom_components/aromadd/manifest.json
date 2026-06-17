@@ -1,0 +1,18 @@
+{
+  "domain": "aromadd",
+  "name": "Aromadd Diffuser",
+  "version": "0.1.0",
+  "documentation": "https://github.com/ajachierno/Aromadd",
+  "issue_tracker": "https://github.com/ajachierno/Aromadd/issues",
+  "codeowners": ["@ajachierno"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "requirements": ["bleak>=0.22.0", "bleak-retry-connector>=3.5.0"],
+  "bluetooth": [
+    { "local_name": "U5*" },
+    { "local_name": "U5 Pro*" },
+    { "local_name": "Aromadd*" }
+  ]
+}
