@@ -5,29 +5,47 @@ A custom [Home Assistant](https://www.home-assistant.io/) integration to control
 
 It exposes the diffuser as a single **switch** entity (on / off).
 
-> [!IMPORTANT]
-> Aromadd diffusers use a **proprietary BLE protocol** spoken only by the official
-> Aromadd app — there is no public API or documented command set. This integration
-> ships with the connection logic fully working but with **placeholder command bytes**.
-> You must capture the real on/off commands from your own device **once** and paste
-> them into `const.py`. See **[CAPTURE_GUIDE.md](CAPTURE_GUIDE.md)** for exact steps.
-> Until then, the switch appears and connects, but won't actually toggle the diffuser.
+> [!NOTE]
+> The BLE protocol was reverse-engineered from a real U5 Pro HCI snoop log, so
+> **on/off works out of the box** — no extra configuration needed. Each command is
+> confirmed by the device's own state-report notification rather than just assumed.
+> See [`CAPTURE_GUIDE.md`](CAPTURE_GUIDE.md) if you want to capture additional
+> commands (mist level, LED, timers) the same way.
 
 ## Features
 
-- On/off control of the Aromadd U5 Pro over BLE
+- Confirmed on/off control of the Aromadd U5 Pro over BLE
 - Automatic Bluetooth discovery (the device shows up in *Settings → Devices & Services*)
-- Connects, sends the command, and disconnects so the Aromadd app can still reconnect
-- Optimistic state (the device does not report power state over BLE)
+- Connects, sends the command, reads back the device's state report, then disconnects
+  so the Aromadd phone app can still reconnect
+
+## How it works (protocol)
+
+Commands are framed as:
+
+```
+A5 AA AC | XOR(payload) | <payload> | C5 CC CA
+```
+
+- Written to the GATT characteristic at value handle `0x0012`
+- The device reports state via notifications on value handle `0x0017`
+
+| Action | Payload     | Full frame                   |
+|--------|-------------|------------------------------|
+| ON     | `57 08 01`  | `a5aaac5e570801c5ccca`       |
+| OFF    | `57 08 00`  | `a5aaac5f570800c5ccca`       |
+
+The diffuser replies with `53 08 01` (on) / `53 08 00` (off), which the integration
+uses to confirm the real power state.
 
 ## Requirements
 
 - Home Assistant **2024.8.0** or newer
-- A working Bluetooth adapter recognised by Home Assistant (built-in, USB dongle,
-  or an [ESPHome Bluetooth Proxy](https://esphome.io/projects/?type=bluetooth) within
-  range of the diffuser)
+- A Bluetooth adapter recognised by Home Assistant (built-in, USB dongle, or an
+  [ESPHome Bluetooth Proxy](https://esphome.io/projects/?type=bluetooth) in range of
+  the diffuser)
 - The diffuser powered on and **not currently connected in the Aromadd phone app**
-  (most BLE devices allow only one connection at a time)
+  (it allows only one BLE connection at a time)
 
 ## Installation
 
@@ -46,38 +64,22 @@ It exposes the diffuser as a single **switch** entity (on / off).
 
 ## Configuration
 
-After installing and restarting:
-
 1. The diffuser is usually **auto-discovered** — look for an "Aromadd Diffuser"
-   discovery card in **Settings → Devices & Services**, and click **Configure**.
+   discovery card in **Settings → Devices & Services** and click **Configure**.
 2. If it isn't discovered automatically, click **+ Add Integration**, search for
    **Aromadd Diffuser**, and pick your device from the list of nearby Bluetooth
    devices (close the Aromadd phone app first so the device is connectable).
 
-## Making it actually control the diffuser
-
-The connection layer works out of the box, but the **command bytes are placeholders**.
-To enable real control:
-
-1. Follow **[CAPTURE_GUIDE.md](CAPTURE_GUIDE.md)** to record an Android HCI snoop log
-   while toggling the diffuser on and off in the Aromadd app.
-2. Read the write characteristic UUID and the on/off byte sequences out of the log.
-3. Edit `custom_components/aromadd/const.py`:
-   - `WRITE_CHARACTERISTIC_UUID`
-   - `CMD_POWER_ON`
-   - `CMD_POWER_OFF`
-4. Restart Home Assistant.
-
-If you send the snoop log to whoever set this up for you, they can fill these in for you.
+That's it — a switch entity appears that turns your diffuser on and off.
 
 ## Project layout
 
 ```
 custom_components/aromadd/
 ├── __init__.py          # setup / teardown, keeps the BLE device fresh
-├── aromadd_device.py    # BLE connect → write → disconnect logic
+├── aromadd_device.py    # BLE connect → write → confirm → disconnect logic
 ├── config_flow.py       # discovery + manual device picker
-├── const.py             # DOMAIN + the 3 values you must fill in
+├── const.py             # domain + the decoded BLE protocol constants
 ├── manifest.json        # integration metadata + Bluetooth matchers
 ├── switch.py            # the on/off switch entity
 ├── strings.json
@@ -86,13 +88,15 @@ custom_components/aromadd/
 
 ## Limitations & notes
 
-- **On/off only** for now. Mist intensity, LED, and timers can be added later once
-  their command bytes are captured the same way.
-- State is **optimistic** — Home Assistant assumes the command worked because the
-  device doesn't broadcast its power state.
+- **On/off only** for now. Mist intensity, LED, and timers use the same framing and
+  can be added once their payloads are captured (see `CAPTURE_GUIDE.md`).
+- State is confirmed at the moment a command is sent. Changes made with the physical
+  button or the phone app while HA isn't connected are not pushed back to HA.
 - BLE range applies. Use a Bluetooth proxy if the diffuser is far from your HA host.
+- Handles (`0x0012` / `0x0017`) are taken from the U5 Pro. If a future firmware moves
+  them, update `WRITE_HANDLE` / `NOTIFY_HANDLE` in `const.py`.
 
 ## Disclaimer
 
-This is an unofficial, community integration and is not affiliated with or endorsed
-by Aromadd. Use at your own risk. Licensed under the MIT License.
+Unofficial community integration, not affiliated with or endorsed by Aromadd.
+Use at your own risk. Licensed under the MIT License.

@@ -1,25 +1,23 @@
 """Constants for the Aromadd Diffuser integration.
 
 ================================================================================
- BLE PROTOCOL CONFIGURATION
+ BLE PROTOCOL  (reverse-engineered from an Aromadd U5 Pro HCI snoop log)
 ================================================================================
-The Aromadd U5 Pro is controlled over Bluetooth Low Energy (BLE) using a
-proprietary protocol that the official Aromadd app speaks. Anthropic's Claude
-could not invent these values, so the three constants below are PLACEHOLDERS.
+The Aromadd app frames every command like this:
 
-To make the integration actually toggle the device you must replace them with
-the real values captured from the device. See CAPTURE_GUIDE.md in the repo root
-for exact, step-by-step instructions on producing an HCI snoop log and reading
-the values out of it with Wireshark.
+    A5 AA AC | XOR(payload) | <payload bytes> | C5 CC CA
+    \_______/  \__________/   \____________/   \_______/
+     header     1-byte cksum     command         footer
 
-You need to discover:
-  1. WRITE_CHARACTERISTIC_UUID  -> the GATT characteristic the app writes to.
-  2. CMD_POWER_ON               -> the exact bytes sent when you tap "on".
-  3. CMD_POWER_OFF              -> the exact bytes sent when you tap "off".
+The checksum is a simple XOR of all payload bytes. Commands are written to the
+GATT characteristic at value handle 0x0012; the device reports its state back
+via notifications on the characteristic at value handle 0x0017.
 
-Until the placeholders are replaced, the integration will install, the switch
-entity will appear, and the BLE connection will be attempted, but the bytes
-sent will be meaningless to the diffuser. A warning is logged on every send.
+Power control:
+    payload 57 08 01  -> ON     (full frame a5aaac5e570801c5ccca)
+    payload 57 08 00  -> OFF    (full frame a5aaac5f570800c5ccca)
+The device replies with a state report payload 53 08 01 (on) / 53 08 00 (off),
+which this integration uses to confirm the real power state.
 ================================================================================
 """
 
@@ -30,23 +28,17 @@ DOMAIN = "aromadd"
 MANUFACTURER = "Aromadd"
 MODEL = "U5 Pro"
 
-# --- REPLACE THESE THREE VALUES (see CAPTURE_GUIDE.md) -----------------------
+# --- BLE framing -------------------------------------------------------------
+FRAME_HEADER = bytes.fromhex("a5aaac")
+FRAME_FOOTER = bytes.fromhex("c5ccca")
 
-# GATT characteristic UUID the Aromadd app writes commands to.
-# 0000ffe1-... is a common module default (HM-10 style) used here only as a
-# best-guess placeholder. Confirm the real UUID from your snoop log.
-WRITE_CHARACTERISTIC_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
+# --- GATT (value handles observed on the U5 Pro) -----------------------------
+WRITE_HANDLE = 0x0012  # characteristic the app writes commands to
+NOTIFY_HANDLE = 0x0017  # characteristic the device reports state on
 
-# Raw command payloads. These are placeholders (a single 0x00 byte) and are
-# intentionally identical so it is obvious they have not been configured yet.
-# Replace with the real captured byte sequences, e.g.
-#   CMD_POWER_ON = bytes.fromhex("a10101005c")
-CMD_POWER_ON: bytes = bytes.fromhex("00")
-CMD_POWER_OFF: bytes = bytes.fromhex("00")
+# --- Command payloads (inner bytes, before framing) --------------------------
+PAYLOAD_POWER_ON = bytes.fromhex("570801")
+PAYLOAD_POWER_OFF = bytes.fromhex("570800")
 
-# -----------------------------------------------------------------------------
-
-# Set automatically: True once the placeholders above have been edited.
-COMMANDS_CONFIGURED: bool = (
-    CMD_POWER_ON != bytes.fromhex("00") or CMD_POWER_OFF != bytes.fromhex("00")
-)
+# --- Device state report (payload prefix + on/off byte) ----------------------
+REPORT_POWER_PREFIX = bytes.fromhex("5308")
