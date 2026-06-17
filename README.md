@@ -1,7 +1,12 @@
 # Aromadd Diffuser — Home Assistant Integration
 
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![Validate](https://github.com/ajachierno/Aromadd/actions/workflows/validate.yaml/badge.svg)](https://github.com/ajachierno/Aromadd/actions/workflows/validate.yaml)
+
 A custom [Home Assistant](https://www.home-assistant.io/) integration to control an
 **Aromadd U5 Pro** essential-oil diffuser over **Bluetooth Low Energy (BLE)**.
+
+[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ajachierno&repository=Aromadd&category=integration)
 
 It exposes the diffuser as a single **switch** entity (on / off).
 
