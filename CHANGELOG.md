@@ -8,9 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Mist intensity control (same frame format, payload to be captured).
+- Mist intensity / fan-speed levels (capture changing the level to map values).
 - LED light control.
-- Run-time / timer modes (1H / 3H / 6H / ON).
+- Device on-board schedules (opcode 0x5716) once the field layout is mapped from
+  targeted captures; HA automations against the switches are recommended meanwhile.
+
+## [0.2.0] - 2026-06-16
+
+### Added
+- **Fan** switch (opcode 0x5703): ON payload `570310`, OFF payload `570300`,
+  confirmed via state report `5303 xx`. Separate from the main Power switch.
+
+### Changed
+- Refactored the BLE device layer to handle multiple controls; the switch
+  platform is now description-driven (Power + Fan).
 
 ## [0.1.0] - 2026-06-16
 
@@ -34,5 +45,6 @@ First public release. Bluetooth LE control of the Aromadd U5 Pro diffuser.
 - Changes made with the physical button or phone app while Home Assistant is not
   connected are not pushed back to HA.
 
-[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ajachierno/Aromadd/releases/tag/v0.1.0

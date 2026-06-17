@@ -1,10 +1,15 @@
-"""Switch platform for the Aromadd Diffuser (on/off)."""
+"""Switch platform for the Aromadd Diffuser (power + fan)."""
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import (
+    SwitchEntity,
+    SwitchEntityDescription,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant, callback
@@ -12,7 +17,33 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .aromadd_device import AromaddDevice
-from .const import DOMAIN, MANUFACTURER, MODEL
+from .const import CONTROL_FAN, CONTROL_POWER, DOMAIN, MANUFACTURER, MODEL
+
+
+@dataclass(frozen=True, kw_only=True)
+class AromaddSwitchDescription(SwitchEntityDescription):
+    """Describes an Aromadd switch."""
+
+    control: str
+    setter: Callable[[AromaddDevice, bool], Awaitable[None]]
+
+
+SWITCHES: tuple[AromaddSwitchDescription, ...] = (
+    AromaddSwitchDescription(
+        key=CONTROL_POWER,
+        translation_key=CONTROL_POWER,
+        icon="mdi:air-purifier",
+        control=CONTROL_POWER,
+        setter=lambda device, on: device.async_set_power(on),
+    ),
+    AromaddSwitchDescription(
+        key=CONTROL_FAN,
+        translation_key=CONTROL_FAN,
+        icon="mdi:fan",
+        control=CONTROL_FAN,
+        setter=lambda device, on: device.async_set_fan(on),
+    ),
+)
 
 
 async def async_setup_entry(
@@ -20,29 +51,35 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the Aromadd switch from a config entry."""
+    """Set up the Aromadd switches from a config entry."""
     device: AromaddDevice = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([AromaddSwitch(entry, device)])
+    async_add_entities(
+        AromaddSwitch(entry, device, description) for description in SWITCHES
+    )
 
 
 class AromaddSwitch(SwitchEntity):
-    """On/off switch for the Aromadd diffuser.
+    """A switch backed by one Aromadd BLE control.
 
     Each command is confirmed by the device's state-report notification, so the
-    reported state reflects what the diffuser acknowledged. State is only known
-    after the first command (or if the diffuser is toggled from this entity);
-    changes made with the physical button or the phone app are not pushed.
+    reported state reflects what the diffuser acknowledged. Changes made with
+    the physical button or the phone app while HA isn't connected are not pushed.
     """
 
     _attr_has_entity_name = True
-    _attr_name = None
-    _attr_icon = "mdi:air-purifier"
+    entity_description: AromaddSwitchDescription
 
-    def __init__(self, entry: ConfigEntry, device: AromaddDevice) -> None:
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        device: AromaddDevice,
+        description: AromaddSwitchDescription,
+    ) -> None:
         """Initialise the switch entity."""
         self._device = device
+        self.entity_description = description
         address: str = entry.data[CONF_ADDRESS]
-        self._attr_unique_id = entry.entry_id
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_device_info = dr.DeviceInfo(
             connections={(dr.CONNECTION_BLUETOOTH, address)},
             identifiers={(DOMAIN, address)},
@@ -53,8 +90,8 @@ class AromaddSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
-        """Return the last confirmed power state."""
-        return self._device.is_on
+        """Return the last confirmed state for this control."""
+        return self._device.state(self.entity_description.control)
 
     async def async_added_to_hass(self) -> None:
         """Register for state-change callbacks from the device."""
@@ -68,11 +105,11 @@ class AromaddSwitch(SwitchEntity):
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the diffuser on."""
-        await self._device.async_turn_on()
+        """Turn this control on."""
+        await self.entity_description.setter(self._device, True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn the diffuser off."""
-        await self._device.async_turn_off()
+        """Turn this control off."""
+        await self.entity_description.setter(self._device, False)
         self.async_write_ha_state()

@@ -121,3 +121,36 @@ this integration for you. The three values can be extracted from the log directl
   `0000ffe1-0000-1000-8000-00805f9b34fb` form when pasting into `const.py`.
 - **Can't connect from HA after editing:** make sure the Aromadd phone app is fully
   closed — the diffuser usually allows only one BLE connection at a time.
+
+---
+
+## Appendix — decoded opcodes & adding more controls
+
+All controls share the same frame (`A5AAAC | XOR | payload | C5CCCA`). Known opcodes:
+
+| Opcode (set) | Meaning | Values seen | State report |
+|--------------|---------|-------------|--------------|
+| `57 08`      | Power   | `01` on / `00` off | `53 08 xx` |
+| `57 03`      | Fan     | `10` on / `00` off | `53 03 xx` |
+| `57 16`      | Schedule (on-board timer) | variable-length record list | `53 09 …` summary |
+| `57 17`      | Set clock | `YYYY(2) MM DD HH MM SS 02` | — |
+| `52 xx`      | Query (read settings/info) | — | `52 xx …` |
+
+To add a new control (e.g. fan speed or LED), capture a snoop log while changing
+**only that one setting** to a few **known** values, then read the `57 xx …` write
+payloads. Send me the log and I can wire it in.
+
+### About schedules (`0x57 16`)
+
+The schedule write is captured, but its field layout (start time, duration,
+day-of-week mask, level) sits in repeating ~9-byte records and can't be mapped
+reliably from a single capture of an unknown schedule. To decode it safely, capture
+logs where you set **one** schedule at a time with known values, e.g.:
+
+1. A schedule that turns on at **08:00** for **30 minutes**, weekdays only.
+2. Then change just the time to **09:15** and re-capture.
+3. Then change just the duration to **60 minutes** and re-capture.
+
+Comparing those isolates which bytes encode each field. In the meantime, the
+recommended approach is to schedule the Home Assistant `switch` entities with HA
+automations, which is more flexible than the device's built-in timer.

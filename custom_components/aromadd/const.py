@@ -1,7 +1,7 @@
 """Constants for the Aromadd Diffuser integration.
 
 ================================================================================
- BLE PROTOCOL  (reverse-engineered from an Aromadd U5 Pro HCI snoop log)
+ BLE PROTOCOL  (reverse-engineered from Aromadd U5 Pro HCI snoop logs)
 ================================================================================
 The Aromadd app frames every command like this:
 
@@ -13,11 +13,12 @@ The checksum is a simple XOR of all payload bytes. Commands are written to the
 GATT characteristic at value handle 0x0012; the device reports its state back
 via notifications on the characteristic at value handle 0x0017.
 
-Power control:
-    payload 57 08 01  -> ON     (full frame a5aaac5e570801c5ccca)
-    payload 57 08 00  -> OFF    (full frame a5aaac5f570800c5ccca)
-The device replies with a state report payload 53 08 01 (on) / 53 08 00 (off),
-which this integration uses to confirm the real power state.
+Controls (opcode 0x57 = set, the device echoes opcode 0x53 = state report):
+
+    Power   payload 57 08 01 -> ON    / 57 08 00 -> OFF   (report 53 08 xx)
+    Fan     payload 57 03 10 -> ON    / 57 03 00 -> OFF   (report 53 03 xx)
+
+State report value is treated as "on" when non-zero.
 ================================================================================
 """
 
@@ -39,6 +40,13 @@ NOTIFY_HANDLE = 0x0017  # characteristic the device reports state on
 # --- Command payloads (inner bytes, before framing) --------------------------
 PAYLOAD_POWER_ON = bytes.fromhex("570801")
 PAYLOAD_POWER_OFF = bytes.fromhex("570800")
+PAYLOAD_FAN_ON = bytes.fromhex("570310")
+PAYLOAD_FAN_OFF = bytes.fromhex("570300")
 
-# --- Device state report (payload prefix + on/off byte) ----------------------
+# --- Device state-report payload prefixes (followed by an on/off byte) -------
 REPORT_POWER_PREFIX = bytes.fromhex("5308")
+REPORT_FAN_PREFIX = bytes.fromhex("5303")
+
+# Logical control keys
+CONTROL_POWER = "power"
+CONTROL_FAN = "fan"

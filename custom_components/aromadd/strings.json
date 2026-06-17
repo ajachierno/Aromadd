@@ -18,5 +18,15 @@
       "no_devices_found": "No nearby Bluetooth devices were found. Power on the diffuser, keep it close to a Bluetooth adapter, and close the Aromadd app so the device is not already connected.",
       "already_configured": "This device is already configured."
     }
+  },
+  "entity": {
+    "switch": {
+      "power": {
+        "name": "Power"
+      },
+      "fan": {
+        "name": "Fan"
+      }
+    }
   }
 }

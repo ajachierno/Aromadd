@@ -8,7 +8,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) integration to control
 
 [![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ajachierno&repository=Aromadd&category=integration)
 
-It exposes the diffuser as a single **switch** entity (on / off).
+It exposes the diffuser's **power** and **fan** as `switch` entities.
 
 > [!NOTE]
 > The BLE protocol was reverse-engineered from a real U5 Pro HCI snoop log, so
@@ -19,7 +19,9 @@ It exposes the diffuser as a single **switch** entity (on / off).
 
 ## Features
 
-- Confirmed on/off control of the Aromadd U5 Pro over BLE
+- Confirmed control of the Aromadd U5 Pro over BLE:
+  - **Power** switch (main on/off)
+  - **Fan** switch (on/off)
 - Automatic Bluetooth discovery (the device shows up in *Settings → Devices & Services*)
 - Connects, sends the command, reads back the device's state report, then disconnects
   so the Aromadd phone app can still reconnect
@@ -35,13 +37,15 @@ A5 AA AC | XOR(payload) | <payload> | C5 CC CA
 - Written to the GATT characteristic at value handle `0x0012`
 - The device reports state via notifications on value handle `0x0017`
 
-| Action | Payload     | Full frame                   |
-|--------|-------------|------------------------------|
-| ON     | `57 08 01`  | `a5aaac5e570801c5ccca`       |
-| OFF    | `57 08 00`  | `a5aaac5f570800c5ccca`       |
+| Control     | Action | Payload     | Full frame             | State report |
+|-------------|--------|-------------|------------------------|--------------|
+| Power       | ON     | `57 08 01`  | `a5aaac5e570801c5ccca` | `53 08 01`   |
+| Power       | OFF    | `57 08 00`  | `a5aaac5f570800c5ccca` | `53 08 00`   |
+| Fan         | ON     | `57 03 10`  | `a5aaac44570310c5ccca` | `53 03 10`   |
+| Fan         | OFF    | `57 03 00`  | `a5aaac54570300c5ccca` | `53 03 00`   |
 
-The diffuser replies with `53 08 01` (on) / `53 08 00` (off), which the integration
-uses to confirm the real power state.
+The diffuser echoes a state report (`53 …`) for each command, which the integration
+uses to confirm the real state rather than assuming it.
 
 ## Requirements
 
@@ -93,8 +97,12 @@ custom_components/aromadd/
 
 ## Limitations & notes
 
-- **On/off only** for now. Mist intensity, LED, and timers use the same framing and
-  can be added once their payloads are captured (see `CAPTURE_GUIDE.md`).
+- **Power + fan on/off** for now. Mist/fan-speed levels and the LED use the same
+  framing and can be added once their payloads are captured (see `CAPTURE_GUIDE.md`).
+- **Scheduling:** rather than programming the diffuser's on-board timer, schedule the
+  `switch` entities with Home Assistant automations — it's more flexible and is the
+  standard Home Assistant approach. (The device's own schedule frame, opcode
+  `0x5716`, is understood but not yet exposed; see `CAPTURE_GUIDE.md`.)
 - State is confirmed at the moment a command is sent. Changes made with the physical
   button or the phone app while HA isn't connected are not pushed back to HA.
 - BLE range applies. Use a Bluetooth proxy if the diffuser is far from your HA host.

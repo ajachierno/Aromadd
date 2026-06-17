@@ -19,11 +19,16 @@ from bleak_retry_connector import (
 )
 
 from .const import (
+    CONTROL_FAN,
+    CONTROL_POWER,
     FRAME_FOOTER,
     FRAME_HEADER,
     NOTIFY_HANDLE,
+    PAYLOAD_FAN_OFF,
+    PAYLOAD_FAN_ON,
     PAYLOAD_POWER_OFF,
     PAYLOAD_POWER_ON,
+    REPORT_FAN_PREFIX,
     REPORT_POWER_PREFIX,
     WRITE_HANDLE,
 )
@@ -34,6 +39,18 @@ _LOGGER = logging.getLogger(__name__)
 # falling back to assuming the command worked.
 CONFIRM_TIMEOUT = 4.0
 
+# Map each control to its (on payload, off payload, state-report prefix).
+_COMMANDS: dict[str, tuple[bytes, bytes, bytes]] = {
+    CONTROL_POWER: (PAYLOAD_POWER_ON, PAYLOAD_POWER_OFF, REPORT_POWER_PREFIX),
+    CONTROL_FAN: (PAYLOAD_FAN_ON, PAYLOAD_FAN_OFF, REPORT_FAN_PREFIX),
+}
+
+# Map a state-report prefix back to its control key.
+_REPORT_PREFIXES: dict[bytes, str] = {
+    REPORT_POWER_PREFIX: CONTROL_POWER,
+    REPORT_FAN_PREFIX: CONTROL_FAN,
+}
+
 
 def build_frame(payload: bytes) -> bytes:
     """Wrap a payload in the Aromadd frame: header + XOR checksum + payload + footer."""
@@ -43,15 +60,14 @@ def build_frame(payload: bytes) -> bytes:
     return FRAME_HEADER + bytes([checksum]) + payload + FRAME_FOOTER
 
 
-def _parse_power_report(data: bytes) -> bool | None:
-    """Return True/False if data is a power state report, else None."""
+def _parse_report(data: bytes) -> tuple[str, bool] | None:
+    """Return (control_key, is_on) for a recognised state report, else None."""
     if len(data) < 6 or data[:3] != FRAME_HEADER or data[-3:] != FRAME_FOOTER:
         return None
     payload = data[4:-3]
-    if payload[: len(REPORT_POWER_PREFIX)] == REPORT_POWER_PREFIX and len(
-        payload
-    ) > len(REPORT_POWER_PREFIX):
-        return bool(payload[len(REPORT_POWER_PREFIX)])
+    for prefix, control in _REPORT_PREFIXES.items():
+        if payload[: len(prefix)] == prefix and len(payload) > len(prefix):
+            return control, bool(payload[len(prefix)])
     return None
 
 
@@ -62,7 +78,10 @@ class AromaddDevice:
         """Initialise with the discovered BLEDevice."""
         self._ble_device = ble_device
         self._lock = asyncio.Lock()
-        self._is_on: bool | None = None
+        self._states: dict[str, bool | None] = {
+            CONTROL_POWER: None,
+            CONTROL_FAN: None,
+        }
         self._callbacks: list[Callable[[], None]] = []
 
     @property
@@ -70,10 +89,9 @@ class AromaddDevice:
         """Return the BLE MAC address of the device."""
         return self._ble_device.address
 
-    @property
-    def is_on(self) -> bool | None:
-        """Return the last known power state (None until first command)."""
-        return self._is_on
+    def state(self, control: str) -> bool | None:
+        """Return the last known state for a control (None until first command)."""
+        return self._states.get(control)
 
     def set_ble_device(self, ble_device: BLEDevice) -> None:
         """Update the cached BLEDevice (called when HA rediscovers it)."""
@@ -93,34 +111,38 @@ class AromaddDevice:
         for callback in self._callbacks:
             callback()
 
-    async def async_turn_on(self) -> None:
-        """Turn the diffuser on."""
-        await self._set_power(True)
+    async def async_set_power(self, turn_on: bool) -> None:
+        """Turn the diffuser on or off."""
+        await self._set(CONTROL_POWER, turn_on)
 
-    async def async_turn_off(self) -> None:
-        """Turn the diffuser off."""
-        await self._set_power(False)
+    async def async_set_fan(self, turn_on: bool) -> None:
+        """Turn the fan on or off."""
+        await self._set(CONTROL_FAN, turn_on)
 
     async def async_disconnect(self) -> None:
         """No persistent connection is held; nothing to tear down."""
         return
 
-    async def _set_power(self, turn_on: bool) -> None:
-        """Connect, send the power command, confirm via notification, disconnect."""
-        payload = PAYLOAD_POWER_ON if turn_on else PAYLOAD_POWER_OFF
-        frame = build_frame(payload)
+    async def _set(self, control: str, turn_on: bool) -> None:
+        """Connect, send a command, confirm via notification, then disconnect."""
+        on_payload, off_payload, _ = _COMMANDS[control]
+        frame = build_frame(on_payload if turn_on else off_payload)
         confirmed = asyncio.Event()
 
         def _on_notify(_char: BleakGATTCharacteristic, data: bytearray) -> None:
-            state = _parse_power_report(bytes(data))
-            if state is not None:
-                self._is_on = state
+            parsed = _parse_report(bytes(data))
+            if parsed is None:
+                return
+            reported_control, is_on = parsed
+            self._states[reported_control] = is_on
+            if reported_control == control:
                 confirmed.set()
 
         async with self._lock:
             _LOGGER.debug(
-                "Connecting to Aromadd %s to turn %s",
+                "Connecting to Aromadd %s to set %s %s",
                 self.address,
+                control,
                 "on" if turn_on else "off",
             )
             client = await establish_connection(
@@ -139,11 +161,10 @@ class AromaddDevice:
 
                 try:
                     await asyncio.wait_for(confirmed.wait(), timeout=CONFIRM_TIMEOUT)
-                    _LOGGER.debug("Confirmed power state: %s", self._is_on)
+                    _LOGGER.debug("Confirmed %s state: %s", control, self._states[control])
                 except asyncio.TimeoutError:
-                    # No confirmation - assume the command took effect.
-                    self._is_on = turn_on
-                    _LOGGER.debug("No confirmation notification; assuming %s", turn_on)
+                    self._states[control] = turn_on
+                    _LOGGER.debug("No confirmation for %s; assuming %s", control, turn_on)
             finally:
                 try:
                     await client.stop_notify(NOTIFY_HANDLE)
