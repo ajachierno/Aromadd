@@ -111,8 +111,12 @@ def _control_candidates(
     def _rank(chars: list[BleakGATTCharacteristic]) -> list[BleakGATTCharacteristic]:
         vendor = [c for c in chars if _is_vendor(c.uuid)]
         vendor.sort(key=lambda c: (_short_uuid(c.uuid) or 0x10000))
-        others = [c for c in chars if c not in vendor]
-        return vendor + others
+        # If vendor (0xFFxx / custom) characteristics exist, use only those.
+        # Standard GATT characteristics like Service Changed (0x2a05) can hang
+        # for ~30s on subscribe and are never the diffuser's control channel.
+        if vendor:
+            return vendor
+        return chars
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
         _LOGGER.debug(
