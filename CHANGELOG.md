@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device on-board schedules (opcode 0x5716) once the field layout is mapped from
   targeted captures; HA automations against the switches are recommended meanwhile.
 
+## [0.2.4] - 2026-06-20
+
+### Fixed
+- **Switches did nothing on the real device.** Characteristic auto-detection
+  classified the vendor `0xFFFx` control characteristics (FFF1..FFF4, expressed
+  in the standard Bluetooth base form) as non-vendor, so commands were written to
+  a generic GATT characteristic and ignored. Vendor detection now recognises the
+  `0xFF00-0xFFFF` proprietary range, and the device layer subscribes to all
+  candidate notify characteristics and tries each candidate write characteristic,
+  keeping whichever returns a state report (and caching it for next time).
+
 ## [0.2.3] - 2026-06-17
 
 ### Added
@@ -73,7 +84,8 @@ First public release. Bluetooth LE control of the Aromadd U5 Pro diffuser.
 - Changes made with the physical button or phone app while Home Assistant is not
   connected are not pushed back to HA.
 
-[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/ajachierno/Aromadd/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.4
 [0.2.3]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.3
 [0.2.2]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ajachierno/Aromadd/releases/tag/v0.2.1

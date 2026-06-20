@@ -1,9 +1,8 @@
 """BLE communication layer for the Aromadd Diffuser.
 
-Connects to the diffuser, resolves the control characteristics from the live
-GATT table, sends a framed command, waits briefly for the device's state-report
-notification to confirm the result, then disconnects so the official Aromadd app
-can reconnect.
+Resolves the control characteristics from the live GATT table, sends a framed
+command, waits for the device's state-report notification to confirm, then
+disconnects so the official Aromadd app can reconnect.
 """
 
 from __future__ import annotations
@@ -25,24 +24,19 @@ from .const import (
     CONTROL_POWER,
     FRAME_FOOTER,
     FRAME_HEADER,
-    NOTIFY_HANDLE,
     PAYLOAD_FAN_OFF,
     PAYLOAD_FAN_ON,
     PAYLOAD_POWER_OFF,
     PAYLOAD_POWER_ON,
     REPORT_FAN_PREFIX,
     REPORT_POWER_PREFIX,
-    WRITE_HANDLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# How long to wait for the device to confirm a command via notification before
-# falling back to assuming the command worked.
-CONFIRM_TIMEOUT = 4.0
+# Per-write wait for the device to confirm via notification.
+CONFIRM_TIMEOUT = 2.5
 
-# Bluetooth SIG base UUID suffix; characteristics/services NOT ending in this are
-# vendor-specific (the Aromadd control service is one of these).
 _SIG_BASE_SUFFIX = "-0000-1000-8000-00805f9b34fb"
 
 _COMMANDS: dict[str, tuple[bytes, bytes, bytes]] = {
@@ -57,7 +51,7 @@ _REPORT_PREFIXES: dict[bytes, str] = {
 
 
 def build_frame(payload: bytes) -> bytes:
-    """Wrap a payload in the Aromadd frame: header + XOR checksum + payload + footer."""
+    """Wrap a payload: header + XOR checksum + payload + footer."""
     checksum = 0
     for byte in payload:
         checksum ^= byte
@@ -75,28 +69,38 @@ def _parse_report(data: bytes) -> tuple[str, bool] | None:
     return None
 
 
+def _short_uuid(uuid: str | None) -> int | None:
+    """Return the 16-bit value of a standard-base UUID, else None (128-bit custom)."""
+    if not uuid:
+        return None
+    u = uuid.lower()
+    if u.endswith(_SIG_BASE_SUFFIX):
+        try:
+            return int(u[:8], 16) & 0xFFFF
+        except ValueError:
+            return None
+    return None  # fully custom 128-bit
+
+
 def _is_vendor(uuid: str | None) -> bool:
-    """True if a UUID is vendor-specific (not a standard Bluetooth SIG UUID)."""
-    return bool(uuid) and not uuid.lower().endswith(_SIG_BASE_SUFFIX)
+    """True if a characteristic UUID is vendor-specific.
 
-
-def _resolve_characteristics(
-    client: BleakClient,
-) -> tuple[BleakGATTCharacteristic | None, BleakGATTCharacteristic | None]:
-    """Find the write and notify characteristics from the connected GATT table.
-
-    Handle numbers can differ between BLE stacks, so we don't trust the captured
-    handles blindly. We try the handle hints first, then fall back to scanning
-    for writable / notifiable characteristics, preferring the vendor service.
+    Covers fully custom 128-bit UUIDs and the 0xFFxx proprietary range (e.g. the
+    FFF0 service's FFF1..FFF4 characteristics) expressed in standard base form.
     """
-    services = client.services
+    short = _short_uuid(uuid)
+    if short is None:
+        return True  # 128-bit custom
+    return short >= 0xFF00
 
-    write_char = services.get_characteristic(WRITE_HANDLE)
-    notify_char = services.get_characteristic(NOTIFY_HANDLE)
 
+def _control_candidates(
+    client: BleakClient,
+) -> tuple[list[BleakGATTCharacteristic], list[BleakGATTCharacteristic]]:
+    """Return (write_candidates, notify_candidates), vendor characteristics first."""
     writable: list[BleakGATTCharacteristic] = []
     notifiable: list[BleakGATTCharacteristic] = []
-    for service in services:
+    for service in client.services:
         for char in service.characteristics:
             props = char.properties
             if "write" in props or "write-without-response" in props:
@@ -104,29 +108,20 @@ def _resolve_characteristics(
             if "notify" in props or "indicate" in props:
                 notifiable.append(char)
 
-    def _prefer_vendor(
-        chars: list[BleakGATTCharacteristic],
-    ) -> BleakGATTCharacteristic | None:
-        if not chars:
-            return None
-        vendor = [c for c in chars if _is_vendor(c.uuid) or _is_vendor(c.service_uuid)]
-        return (vendor or chars)[0]
-
-    if write_char is None:
-        write_char = _prefer_vendor(writable)
-    if notify_char is None:
-        notify_char = _prefer_vendor(notifiable)
+    def _rank(chars: list[BleakGATTCharacteristic]) -> list[BleakGATTCharacteristic]:
+        vendor = [c for c in chars if _is_vendor(c.uuid)]
+        vendor.sort(key=lambda c: (_short_uuid(c.uuid) or 0x10000))
+        others = [c for c in chars if c not in vendor]
+        return vendor + others
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
         _LOGGER.debug(
-            "GATT chars: writable=%s notifiable=%s -> write=%s notify=%s",
-            [c.uuid for c in writable],
-            [c.uuid for c in notifiable],
-            write_char.uuid if write_char else None,
-            notify_char.uuid if notify_char else None,
+            "GATT writable=%s notifiable=%s",
+            [(c.uuid, c.handle) for c in writable],
+            [(c.uuid, c.handle) for c in notifiable],
         )
 
-    return write_char, notify_char
+    return _rank(writable), _rank(notifiable)
 
 
 class AromaddDevice:
@@ -141,6 +136,8 @@ class AromaddDevice:
             CONTROL_FAN: None,
         }
         self._callbacks: list[Callable[[], None]] = []
+        # Cache the write characteristic that actually worked, to skip retries.
+        self._known_write_uuid: str | None = None
 
     @property
     def address(self) -> str:
@@ -182,7 +179,7 @@ class AromaddDevice:
         return
 
     async def _set(self, control: str, turn_on: bool) -> None:
-        """Connect, send a command, confirm via notification, then disconnect."""
+        """Connect, send the command (auto-finding the right characteristic), confirm."""
         on_payload, off_payload, _ = _COMMANDS[control]
         frame = build_frame(on_payload if turn_on else off_payload)
         confirmed = asyncio.Event()
@@ -199,49 +196,56 @@ class AromaddDevice:
         async with self._lock:
             _LOGGER.debug(
                 "Connecting to Aromadd %s to set %s %s",
-                self.address,
-                control,
-                "on" if turn_on else "off",
+                self.address, control, "on" if turn_on else "off",
             )
             client = await establish_connection(
                 BleakClientWithServiceCache,
                 self._ble_device,
                 self._ble_device.name or self._ble_device.address,
             )
+            subscribed: list[BleakGATTCharacteristic] = []
             try:
-                write_char, notify_char = _resolve_characteristics(client)
-                if write_char is None:
-                    raise RuntimeError(
-                        "Could not find a writable characteristic on the Aromadd "
-                        "device; the GATT layout was not as expected."
-                    )
+                write_chars, notify_chars = _control_candidates(client)
+                if not write_chars:
+                    raise RuntimeError("No writable characteristic found on device")
 
-                if notify_char is not None:
+                for ch in notify_chars:
                     try:
-                        await client.start_notify(notify_char, _on_notify)
+                        await client.start_notify(ch, _on_notify)
+                        subscribed.append(ch)
                     except Exception as err:  # noqa: BLE001 - best-effort
-                        _LOGGER.debug("Could not subscribe to notifications: %s", err)
+                        _LOGGER.debug("notify subscribe failed on %s: %s", ch.uuid, err)
 
-                await client.write_gatt_char(write_char, frame, response=True)
-                _LOGGER.debug("Wrote %s to %s", frame.hex(), write_char.uuid)
+                # Prefer a previously-successful write characteristic.
+                ordered = sorted(
+                    write_chars, key=lambda c: c.uuid != self._known_write_uuid
+                )
 
-                if notify_char is not None:
+                for ch in ordered:
+                    confirmed.clear()
+                    try:
+                        await client.write_gatt_char(ch, frame, response=True)
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.debug("write failed on %s: %s", ch.uuid, err)
+                        continue
+                    _LOGGER.debug("Wrote %s to %s", frame.hex(), ch.uuid)
                     try:
                         await asyncio.wait_for(confirmed.wait(), timeout=CONFIRM_TIMEOUT)
+                        self._known_write_uuid = ch.uuid
                         _LOGGER.debug(
-                            "Confirmed %s state: %s", control, self._states[control]
+                            "Confirmed %s via %s -> %s",
+                            control, ch.uuid, self._states[control],
                         )
+                        break
                     except asyncio.TimeoutError:
-                        self._states[control] = turn_on
-                        _LOGGER.debug(
-                            "No confirmation for %s; assuming %s", control, turn_on
-                        )
+                        _LOGGER.debug("No confirmation from %s, trying next", ch.uuid)
                 else:
                     self._states[control] = turn_on
+                    _LOGGER.debug("No confirmation for %s; assuming %s", control, turn_on)
             finally:
-                if notify_char is not None:
+                for ch in subscribed:
                     try:
-                        await client.stop_notify(notify_char)
+                        await client.stop_notify(ch)
                     except Exception:  # noqa: BLE001
                         pass
                 await client.disconnect()
